@@ -11,7 +11,6 @@ OPENCV_VER ?= 4.5.4
 OPENCV_DIR = $(shell pwd)/3rd_party/opencv
 HEADERS_TXT = $(CMAKE_OPENCV_BUILD_DIR)/modules/python_bindings_generator/headers.txt
 CONFIGURATION_PRIVATE_HPP = $(C_SRC)/configuration.private.hpp
-ELIXIR_BINDING_CMAKELISTS_TXT = $(OPENCV_DIR)/modules/evision/CMakeLists.txt
 # this .cmake enables nerves build if environment variable MIX_TARGET exists and not empty
 # no effect on normal build
 TOOLCHAIN_FILE ?= $(shell pwd)/nerves/toolchain.cmake
@@ -53,13 +52,10 @@ $(HEADERS_TXT):
 	 	make "$(MAKE_BUILD_FLAGS)" && \
 	 	make install
 
-$(ELIXIR_BINDING_CMAKELISTS_TXT):
-	@ cp -a "$(shell pwd)/modules/evision" "$(OPENCV_DIR)/modules"
-
-$(EVISION_SO): $(CONFIGURATION_PRIVATE_HPP) $(ELIXIR_BINDING_CMAKELISTS_TXT) $(HEADERS_TXT)
+$(EVISION_SO): $(CONFIGURATION_PRIVATE_HPP) $(HEADERS_TXT)
 	@ mkdir -p $(PRIV_DIR)
 	@ mkdir -p $(CMAKE_EVISION_BUILD_DIR)
-	@ cp "$(CMAKE_OPENCV_BUILD_DIR)/modules/elixir_bindings_generator/headers.txt" "$(C_SRC)/headers.txt"
+	@ cp "$(CMAKE_OPENCV_BUILD_DIR)/modules/python_bindings_generator/headers.txt" "$(C_SRC)/headers.txt"
 	@ cd "$(CMAKE_EVISION_BUILD_DIR)" && \
 		cmake --toolchain="$(TOOLCHAIN_FILE)" \
 		-DC_SRC="$(C_SRC)" -DLIB_SRC="$(LIB_SRC)" \
