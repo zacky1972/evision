@@ -28,10 +28,10 @@ $(HEADERS_TXT):
 	@ git submodule update --init --recursive
 	@ cd $(OPENCV_DIR) && git checkout "tags/${OPENCV_VER}"
 	@ cd $(CMAKE_OPENCV_BUILD_DIR) && \
-	 	cmake -S $(OPENCV_DIR) \
+	 	cmake --toolchain="$(TOOLCHAIN_FILE)" \
+	 	-S $(OPENCV_DIR) \
 	 	-D CMAKE_BUILD_TYPE=RELEASE \
 	 	-D CMAKE_INSTALL_PREFIX=$(PRIV_DIR) \
-	 	-D PYTHON3_EXECUTABLE=$(PYTHON3_EXECUTABLE) \
 	 	-D BUILD_opencv_python2=OFF \
 	 	-D BUILD_opencv_python3=OFF \
 	 	-D BUILD_opencv_dnn=OFF \
@@ -49,8 +49,7 @@ $(HEADERS_TXT):
 		-D BUILD_WEBP=ON \
 		-D BUILD_OPENJPEG=ON \
 		-D BUILD_JASPER=ON \
-		-D BUILD_OPENEXR=ON \
-		--toolchain="$(TOOLCHAIN_FILE)" && \
+		-D BUILD_OPENEXR=ON && \
 	 	make "$(MAKE_BUILD_FLAGS)" && \
 	 	make install
 
@@ -62,9 +61,9 @@ $(EVISION_SO): $(CONFIGURATION_PRIVATE_HPP) $(ELIXIR_BINDING_CMAKELISTS_TXT) $(H
 	@ mkdir -p $(CMAKE_EVISION_BUILD_DIR)
 	@ cp "$(CMAKE_OPENCV_BUILD_DIR)/modules/elixir_bindings_generator/headers.txt" "$(C_SRC)/headers.txt"
 	@ cd "$(CMAKE_EVISION_BUILD_DIR)" && \
-		cmake -DC_SRC="$(C_SRC)" -DLIB_SRC="$(LIB_SRC)" \
+		cmake --toolchain="$(TOOLCHAIN_FILE)" \
+		-DC_SRC="$(C_SRC)" -DLIB_SRC="$(LIB_SRC)" \
 		-DPY_SRC="$(PY_SRC)" -DPRIV_DIR="$(PRIV_DIR)" \
-		-DERTS_INCLUDE_DIR="$(ERTS_INCLUDE_DIR)" -S "$(shell pwd)" \
-		--toolchain="$(TOOLCHAIN_FILE)" && \
+		-DERTS_INCLUDE_DIR="$(ERTS_INCLUDE_DIR)" -S "$(shell pwd)" && \
 		make "$(MAKE_BUILD_FLAGS)"
 	@ mv "$(CMAKE_EVISION_BUILD_DIR)/evision.so" "$(EVISION_SO)"
