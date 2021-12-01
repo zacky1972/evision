@@ -1,20 +1,25 @@
 #!/usr/bin/env elixir
 
 defmodule While do
-    def while(condition, acc, body) do
-        should_continue = true
-        if should_continue and condition.() do
-            acc = case body.(acc) do
-                {:continue, acc1} ->
-                    while(condition, acc1, body)
-                {:break, acc1} ->
-                    should_continue = false
-                    acc1
-                acc1 ->
-                    while(condition, acc1, body)
-            end
+    def do_while(condition, acc, body), do: execute_body(condition, acc, body)
+    def while(condition, acc, body), do: while(condition, acc, body, true)
+    def while(_condition, acc, _body, false), do: acc
+    def while(condition, acc, body, true), do: condition_check(condition, acc, body)
+    defp condition_check(condition, acc, body) do
+        case condition.() do
+            true -> execute_body(condition, acc, body)
+            false -> acc
         end
-        acc
+    end
+    defp execute_body(condition, acc, body) do
+        case body.(acc) do
+            {:continue, acc1} ->
+                while(condition, acc1, body, true)
+            {:break, acc1} ->
+                while(condition, acc1, body, false)
+            acc1 ->
+                while(condition, acc1, body, true)
+        end
     end
 end
 
