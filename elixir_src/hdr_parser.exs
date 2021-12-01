@@ -103,6 +103,39 @@ defmodule CppHeaderParser do
         end
     end
 
+    def get_macro_arg(self=%CppHeaderParser{}, arg_str, npos) do
+        s_arg_str = String.slice(arg_str, npos, String.length(arg_str) - npos)
+        npos2 = case :binary.match(s_arg_str, "(") do
+            :nomatch ->
+                IO.puts("Error: no arguments for the macro at #{self.hname}:#{self.lineno}")
+                1 != 1
+            {npos2, _} -> npos2 + npos
+        end
+        balance = 1
+        npos3 = npos2
+        {npos3, balance} = While.while(fn -> true end, {npos3, balance}, fn {npos3, balance} ->
+            {t, npos3} = find_next_token(arg_str, ["(", ")"], npos3+1)
+            if npos3 < 0 do
+                IO.puts("Error: no matching ')' in the macro call at #{self.hname}:#{self.lineno}")
+                1 != 1
+            end
+            if t == "(" do
+                balance = balance + 1
+            end
+            if t == ")" do
+                balance = balance - 1
+            end
+
+            if balance == 0 do
+                {:break, {self, balance}}
+            else
+                {self, balance}
+            end
+        end)
+
+        {String.slice(arg_str, npos2+1, npos3-npos2+1) |> String.trim(), npos3}
+    end
+
     @doc """
     Parses class/struct declaration start in the form:
         {class|struct} [CV_EXPORTS] <class_name> [: public <base_class1> [, ...]]
