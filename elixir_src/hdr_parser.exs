@@ -95,11 +95,61 @@ defmodule CppHeaderParser do
                         n
                 end
                 n = n <> String.replace(name, "::", ".")
-                if String.ends_with?(n, ".Algorithm"):
+                if String.ends_with?(n, ".Algorithm") do
                     n = "cv.Algorithm"
+                end
                 n
             end
         end
+    end
+
+    @doc """
+    Parses class/struct declaration start in the form:
+        {class|struct} [CV_EXPORTS] <class_name> [: public <base_class1> [, ...]]
+    Returns class_name1, <list of base_classes>
+    """
+    def parse_class_decl(self=%CppHeaderParser{}, decl_str) do
+        l = decl_str
+        modlist = []
+        if String.match?(l, "CV_EXPORTS_W_MAP") do
+            l = String.replace(l, "CV_EXPORTS_W_MAP", "", global: true)
+            modlist = [modlist | "/Map"]
+        end
+        if String.match?(l, "CV_EXPORTS_W_SIMPLE") do
+            l = String.replace(l, "CV_EXPORTS_W_SIMPLE", "", global: true)
+            modlist = [modlist | "/Simple"]
+        end
+
+        npos = case :binary.match(l, "CV_EXPORTS_AS") do
+            {pos, _} -> pos
+            _ -> -1
+        end
+
+        if npos < 0 do
+            npos = case :binary.match(l, "CV_WRAP_AS") do
+                {npos2, _} -> npos2
+                :nomatch -> -1
+            end
+        end
+
+        if npos > 0 do
+            {macro_arg, npos3} = get_macro_arg(self, l, npos)
+            modlist = [modlist | "=" <> macro_arg]
+            l = String.slice(l, 0, npos) <> String.slice(l, npos3 + 1, String.length(l) - npos3 + 1)
+        end
+
+        l = batch_replace(l, [
+            {"CV_EXPORTS_W", ""},
+            {"CV_EXPORTS", ""},
+            {"public virtual ", " "},
+            {"public ", " "},
+            {"::", "."}])
+            |> String.trim()
+        ll = String.split(l, Regex.compile!("\\s+|\\s*[,:]\\s*"))
+        ll = Enum.filter(ll, fn le -> String.length(le) > 0 end)
+        classname = Enum.at(ll, 1)
+        [_,_|bases] = ll
+        {classname, bases, modlist}
     end
 
     @doc """
@@ -409,7 +459,8 @@ defmodule CppHeaderParser do
         # CppHeaderParser.test
         parser = CppHeaderParser.new
         # just for testing
-        [file|_] = System.argv()
+        # [file|_] = System.argv()
+        file = "/Users/cocoa/Git/evision/3rd_party/opencv/modules/core/include/opencv2/core/mat1.hpp"
         parsed = CppHeaderParser.parse(parser, file)
     end
 end
