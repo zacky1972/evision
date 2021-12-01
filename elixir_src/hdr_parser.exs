@@ -185,6 +185,35 @@ defmodule CppHeaderParser do
         {classname, bases, modlist}
     end
 
+    def parse_enum(self=%CppHeaderParser{}, decl_str) do
+        l = decl_str
+
+        ll = String.split(l, ",", global: true)
+        if List.last(ll) |> String.trim() == "" do
+            ll = ll |> Enum.reverse() |> tl() |> Enum.reverse()
+        end
+        prev_val = ""
+        prev_val_delta = -1
+        decl = []
+        for pair <- ll, reduce: {decl, prev_val, prev_val_delta} do
+            {decl, prev_val, prev_val_delta} ->
+                pv = String.split(pair, "=")
+                val = ""
+                if Enum.count(pv) == 1 do
+                    prev_val_delta = prev_val_delta + 1
+                    if prev_val != "" do
+                        val = prev_val <> "+"
+                    end
+                    val = val <> Integer.to_string(prev_val_delta)
+                else
+                    prev_val_delta = 0
+                    val = Enum.at(pv, 1) |> String.trim()
+                    prev_val = val
+                end
+                decl = [decl | ["const " <> get_dotted_name(self, Enum.at(pv, 0) |> String.trim()), val, [], [], nil, ""]]
+        end
+    end
+
     @doc """
     parses the statement (ending with ';' or '}') or a block head (ending with '{')
 
@@ -262,7 +291,84 @@ defmodule CppHeaderParser do
                                 {stmt_type, classname, true, decl}
                         end
                     end
+
+                    # todo
+                    if String.starts_with?(stmt, "class") or String.starts_with?(stmt, "struct") do
+                        # stmt_type = stmt.split()[0]
+                        # if stmt.strip() != stmt_type:
+                        #     try:
+                        #         classname, bases, modlist = self.parse_class_decl(stmt)
+                        #     except:
+                        #         print("Error at %s:%d" % (self.hname, self.lineno))
+                        #         exit(1)
+                        #     decl = []
+                        #     if ("CV_EXPORTS_W" in stmt) or ("CV_EXPORTS_AS" in stmt) or (not self.wrap_mode):# and ("CV_EXPORTS" in stmt)):
+                        #         decl = [stmt_type + " " + self.get_dotted_name(classname), "", modlist, [], None, docstring]
+                        #         if bases:
+                        #             decl[1] = ": " + ", ".join([self.get_dotted_name(b).replace(".","::") for b in bases])
+                        #     return stmt_type, classname, True, decl
+                    end
+
+                    if String.starts_with?(stmt, "enum") or String.starts_with?(stmt, "namespace") do
+                        # NB: Drop inheritance syntax for enum
+                        stmt = String.split(stmt, ":") |> Enum.at(0)
+                        splits = String.split(stmt, " ")
+                        if Enum.count(splits) >= 2 do
+                            stmt_list_0 = Enum.join(splits |> Enum.reverse() |> tl() |> Enum.reverse(), " ")
+                            stmt_list_1 = List.last(splits)
+                            {stmt_list_0, stmt_list_1, true, nil}
+                        else
+                            {splits, "<unnamed>", true, nil}
+                        end
+                    end
+
+                    if String.starts_with?(stmt, "extern") and String.match?(stmt, "\"C\"") do
+                        {"namespace", "", true, nil}
+                    end
                 end
+
+                if end_token == "}" and context.startswith("enum") do
+                    # todo: parse_enum
+                    decl = parse_enum(self, stmt)
+                    name = Enum.at(stack_top, @kBLOCK_NAME)
+                    {context, name, false, decl}
+                end
+
+                if end_token == ";" and String.starts_with?(stmt, "typedef") do
+                    # TODO: handle typedef's more intelligently
+                    {stmt_type, "", false, nil}
+                end
+
+                # todo
+                # paren_pos = stmt.find("(")
+                # if paren_pos >= 0:
+                #     # assume it's function or method declaration,
+                #     # since we filtered off the other places where '(' can normally occur:
+                #     #   - code blocks
+                #     #   - function pointer typedef's
+                #     decl = self.parse_func_decl(stmt, mat=mat, docstring=docstring)
+                #     # we return parse_flag == False to prevent the parser to look inside function/method bodies
+                #     # (except for tracking the nested blocks)
+                #     return stmt_type, "", False, decl
+
+                # if (context == "struct" or context == "class") and end_token == ";" and stmt:
+                #     # looks like it's member declaration; append the members to the class declaration
+                #     class_decl = stack_top[self.CLASS_DECL]
+                #     if ("CV_PROP" in stmt): # or (class_decl and ("/Map" in class_decl[2])):
+                #         var_modlist = []
+                #         if "CV_PROP_RW" in stmt:
+                #             var_modlist.append("/RW")
+                #         stmt = self.batch_replace(stmt, [("CV_PROP_RW", ""), ("CV_PROP", "")]).strip()
+                #         var_list = stmt.split(",")
+                #         var_type, var_name1, modlist, argno = self.parse_arg(var_list[0], -1)
+                #         var_list = [var_name1] + [i.strip() for i in var_list[1:]]
+
+                #         for v in var_list:
+                #             class_decl[3].append([var_type, v, "", var_modlist])
+                #     return stmt_type, "", False, None
+
+                # # something unknown
+                # return stmt_type, "", False, None
             end
         end
     end
