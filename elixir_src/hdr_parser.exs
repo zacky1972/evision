@@ -58,6 +58,51 @@ defmodule CppHeaderParser do
     def wrap_ok({:ok, val}), do: val
 
     @doc """
+    adds the dot-separated container class/namespace names to the bare function/class name, e.g. when we have
+
+    namespace cv {
+    class A {
+    public:
+        f(int);
+    };
+    }
+
+    the function will convert "A" to "cv.A" and "f" to "cv.A.f".
+    """
+    def get_dotted_name(self=%CppHeaderParser{}, name) do
+        if Enum.count(self.block_stack) == 0 do
+            name
+        else
+            if String.starts_with?(name, "cv.") do
+                name
+            else
+                qualified_name = (String.match?(name, Regex.compile!(".")) or String.match?(name, Regex.compile!("::")))
+                n = for b <- self.block_stack, reduce: "" do
+                    n ->
+                        {block_type, block_name} = {Enum.at(b, @kBLOCK_TYPE), Enum.at(b, @kBLOCK_NAME)}
+                        if not Enum.member?(["file", "enum"], block_type) do
+                            if not Enum.member?(["enum struct", "enum class"], block_type) or block_name != name do
+                                if not Enum.member?(["struct", "class", "namespace", "enum struct", "enum class"], block_type) do
+                                    IO.puts("Error at #{self.lineno}: there are non-valid entries in the current block stack #{self.block_stack}")
+                                    1 != 1
+                                else
+                                    if String.length(block_name) > 0 and (block_type == "namespace" or not qualified_name) do
+                                        n = n <> block_name <> "."
+                                    end
+                                end
+                            end
+                        end
+                        n
+                end
+                n = n <> String.replace(name, "::", ".")
+                if String.ends_with?(n, ".Algorithm"):
+                    n = "cv.Algorithm"
+                n
+            end
+        end
+    end
+
+    @doc """
     parses the statement (ending with ';' or '}') or a block head (ending with '{')
 
     The function calls parse_class_decl or parse_func_decl when necessary. It returns
@@ -107,9 +152,35 @@ defmodule CppHeaderParser do
                 end)
             end
 
-            if not stack_top[self.PUBLIC_SECTION] or stmt.startswith("template"):
-                return stmt_type, "", False, None
-
+            if not Enum.at(stack_top, @kPUBLIC_SECTION) or String.starts_with?(stmt, "template") do
+                {stmt_type, "", false, nil}
+            else
+                if end_token == "{" do
+                    if not self.wrap_mode and String.starts_with?(stmt, "typedef struct") do
+                        stmt_type = "struct"
+                        offset = String.length("typedef ")
+                        case parse_class_decl(self, String.slice(stmt, offset, String.length(stmt) - offset)) do
+                            :error ->
+                                IO.puts("Error at #{self.hname}:#{self.lineno}")
+                                1 != 1
+                            {classname, bases, modlist} ->
+                                if String.starts_with?(classname, "_Ipl") do
+                                    classname = String.slice(classname, 1, String.length(classname) - 1)
+                                end
+                                decl = [stmt_type <> " " <> get_dotted_name(self, classname), "", modlist, [], nil, docstring]
+                                if bases != nil do
+                                    decl_1 = ": " <> (Enum.map(bases, fn b ->
+                                        get_dotted_name(self, b)
+                                        |> String.replace(".", "::", global: true)
+                                    end)
+                                    |> Enum.join(", "))
+                                    decl = List.update_at(decl, 1, fn _ -> decl_1 end)
+                                end
+                                {stmt_type, classname, true, decl}
+                        end
+                    end
+                end
+            end
         end
     end
 
