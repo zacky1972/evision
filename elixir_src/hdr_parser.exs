@@ -222,12 +222,13 @@ defmodule CppHeaderParser do
     where the first 3 values only make sense for blocks (i.e. code blocks, namespaces, classes, enums and such)
     """
     def parse_stmt(self=%CppHeaderParser{}, stmt, end_token, mat \\ "Mat", docstring \\ "") do
+        stack_top_index = Enum.count(self.block_stack) - 1
         stack_top = List.last(self.block_stack)
         context = Enum.at(stack_top, @kBLOCK_TYPE)
 
         if String.starts_with?(stmt, "inline namespace") do
             # emulate anonymous namespace
-            {"namespace", "", true, nil}
+            {self, "namespace", "", true, nil}
         else
             stmt_type = ""
             if end_token == "{" do
@@ -265,7 +266,7 @@ defmodule CppHeaderParser do
             end
 
             if not Enum.at(stack_top, @kPUBLIC_SECTION) or String.starts_with?(stmt, "template") do
-                {stmt_type, "", false, nil}
+                {self, stmt_type, "", false, nil}
             else
                 if end_token == "{" do
                     if not self.wrap_mode and String.starts_with?(stmt, "typedef struct") do
@@ -288,87 +289,110 @@ defmodule CppHeaderParser do
                                     |> Enum.join(", "))
                                     decl = List.update_at(decl, 1, fn _ -> decl_1 end)
                                 end
-                                {stmt_type, classname, true, decl}
+                                {self, stmt_type, classname, true, decl}
+                        end
+                    else
+                        condition = (String.starts_with?(stmt, "class") or String.starts_with?(stmt, "struct"))
+                        stmt_type = String.split(stmt, ":") |> Enum.at(0)
+                        case {condition, String.trim(stmt) != stmt_type} do
+                            {true, true} ->
+                                case parse_class_decl(self, stmt) do
+                                    :error ->
+                                        IO.puts("Error at #{self.hname}:#{self.lineno}")
+                                        1 != 1
+                                    {classname, bases, modlist} ->
+                                        decl = []
+                                        if String.match?(stmt, "CV_EXPORTS_W") or String.match?(stmt, "CV_EXPORTS_AS") or not self.wrap_mode do
+                                            decl = [stmt_type <> " " <> get_dotted_name(self, classname), "", modlist, [], nil, docstring]
+                                            if bases != nil do
+                                                decl_1 = ": " <> (Enum.map(bases, fn b ->
+                                                    get_dotted_name(self, b)
+                                                    |> String.replace(".", "::", global: true)
+                                                end)
+                                                |> Enum.join(", "))
+                                                decl = List.update_at(decl, 1, fn _ -> decl_1 end)
+                                            end
+                                        end
+                                        {self, stmt_type, classname, true, decl}
+                                end
+                            _ ->
+                                if String.starts_with?(stmt, "enum") or String.starts_with?(stmt, "namespace") do
+                                    # NB: Drop inheritance syntax for enum
+                                    stmt = String.split(stmt, ":") |> Enum.at(0)
+                                    splits = String.split(stmt, " ")
+                                    if Enum.count(splits) >= 2 do
+                                        stmt_list_0 = Enum.join(splits |> Enum.reverse() |> tl() |> Enum.reverse(), " ")
+                                        stmt_list_1 = List.last(splits)
+                                        {self, stmt_list_0, stmt_list_1, true, nil}
+                                    else
+                                        {self, splits, "<unnamed>", true, nil}
+                                    end
+                                else
+                                    if String.starts_with?(stmt, "extern") and String.match?(stmt, "\"C\"") do
+                                        {self, "namespace", "", true, nil}
+                                    else
+                                        # something unknown
+                                        {self, stmt_type, "", false, nil}
+                                    end
+                                end
                         end
                     end
-
-                    # todo
-                    if String.starts_with?(stmt, "class") or String.starts_with?(stmt, "struct") do
-                        # stmt_type = stmt.split()[0]
-                        # if stmt.strip() != stmt_type:
-                        #     try:
-                        #         classname, bases, modlist = self.parse_class_decl(stmt)
-                        #     except:
-                        #         print("Error at %s:%d" % (self.hname, self.lineno))
-                        #         exit(1)
-                        #     decl = []
-                        #     if ("CV_EXPORTS_W" in stmt) or ("CV_EXPORTS_AS" in stmt) or (not self.wrap_mode):# and ("CV_EXPORTS" in stmt)):
-                        #         decl = [stmt_type + " " + self.get_dotted_name(classname), "", modlist, [], None, docstring]
-                        #         if bases:
-                        #             decl[1] = ": " + ", ".join([self.get_dotted_name(b).replace(".","::") for b in bases])
-                        #     return stmt_type, classname, True, decl
-                    end
-
-                    if String.starts_with?(stmt, "enum") or String.starts_with?(stmt, "namespace") do
-                        # NB: Drop inheritance syntax for enum
-                        stmt = String.split(stmt, ":") |> Enum.at(0)
-                        splits = String.split(stmt, " ")
-                        if Enum.count(splits) >= 2 do
-                            stmt_list_0 = Enum.join(splits |> Enum.reverse() |> tl() |> Enum.reverse(), " ")
-                            stmt_list_1 = List.last(splits)
-                            {stmt_list_0, stmt_list_1, true, nil}
+                else
+                    if end_token == "}" and context.startswith("enum") do
+                        decl = parse_enum(self, stmt)
+                        name = Enum.at(stack_top, @kBLOCK_NAME)
+                        {self, context, name, false, decl}
+                    else
+                        if end_token == ";" and String.starts_with?(stmt, "typedef") do
+                            # TODO: handle typedef's more intelligently
+                            {self, stmt_type, "", false, nil}
                         else
-                            {splits, "<unnamed>", true, nil}
+                            if String.match?(stmt, "(") do
+                                # assume it's function or method declaration,
+                                # since we filtered off the other places where '(' can normally occur:
+                                #   - code blocks
+                                #   - function pointer typedef's
+                                # todo: parse_func_decl
+                                decl = parse_func_decl(self, stmt, mat: mat, docstring: docstring)
+                                # we return parse_flag == False to prevent the parser to look inside function/method bodies
+                                # (except for tracking the nested blocks)
+                                {self, stmt_type, "", false, decl}
+                            else
+                                if (context == "struct" or context == "class") and end_token == ";" and String.length(stmt) > 0 do
+                                    # looks like it's member declaration; append the members to the class declaration
+                                    class_decl = Enum.at(stack_top, @kCLASS_DECL)
+                                    if String.match?(stmt, "CV_PROP") do # or (class_decl and ("/Map" in class_decl[2])):
+                                        var_modlist = []
+                                        if String.match?(stmt, "CV_PROP_RW") do
+                                            var_modlist = [var_modlist | "/RW"]
+                                        end
+                                        stmt = batch_replace(stmt, [{"CV_PROP_RW", ""}, {"CV_PROP", ""}]) |> String.trim()
+                                        var_list = String.split(stmt, ",")
+                                        # todo: parse_arg
+                                        {var_type, var_name1, modlist, argno} = parse_arg(self, var_list[0], -1)
+                                        var_list = [var_name1] ++ Enum.map(tl(var_list), fn i -> String.trim(i) end)
+
+                                        class_decl_3 = Enum.at(class_decl, 3)
+                                        for v <- var_list, reduce: class_decl_3 do
+                                            class_decl_3 ->
+                                                class_decl_3 = [class_decl_3 | [var_type, v, "", var_modlist]]
+                                        end
+                                        class_decl = List.update_at(class_decl, 3, fn _ -> class_decl_3 end)
+                                        stack_top = List.update_at(stack_top, @kCLASS_DECL, fn _ -> class_decl end)
+                                        block_stack = List.update_at(self.block_stack, stack_top_index, fn _ -> stack_top end)
+                                        {self, stmt_type, "", false, nil}
+                                    else
+                                        # something unknown
+                                        {self, stmt_type, "", false, nil}
+                                    end
+                                else
+                                    # something unknown
+                                    {self, stmt_type, "", false, nil}
+                                end
+                            end
                         end
                     end
-
-                    if String.starts_with?(stmt, "extern") and String.match?(stmt, "\"C\"") do
-                        {"namespace", "", true, nil}
-                    end
                 end
-
-                if end_token == "}" and context.startswith("enum") do
-                    # todo: parse_enum
-                    decl = parse_enum(self, stmt)
-                    name = Enum.at(stack_top, @kBLOCK_NAME)
-                    {context, name, false, decl}
-                end
-
-                if end_token == ";" and String.starts_with?(stmt, "typedef") do
-                    # TODO: handle typedef's more intelligently
-                    {stmt_type, "", false, nil}
-                end
-
-                # todo
-                # paren_pos = stmt.find("(")
-                # if paren_pos >= 0:
-                #     # assume it's function or method declaration,
-                #     # since we filtered off the other places where '(' can normally occur:
-                #     #   - code blocks
-                #     #   - function pointer typedef's
-                #     decl = self.parse_func_decl(stmt, mat=mat, docstring=docstring)
-                #     # we return parse_flag == False to prevent the parser to look inside function/method bodies
-                #     # (except for tracking the nested blocks)
-                #     return stmt_type, "", False, decl
-
-                # if (context == "struct" or context == "class") and end_token == ";" and stmt:
-                #     # looks like it's member declaration; append the members to the class declaration
-                #     class_decl = stack_top[self.CLASS_DECL]
-                #     if ("CV_PROP" in stmt): # or (class_decl and ("/Map" in class_decl[2])):
-                #         var_modlist = []
-                #         if "CV_PROP_RW" in stmt:
-                #             var_modlist.append("/RW")
-                #         stmt = self.batch_replace(stmt, [("CV_PROP_RW", ""), ("CV_PROP", "")]).strip()
-                #         var_list = stmt.split(",")
-                #         var_type, var_name1, modlist, argno = self.parse_arg(var_list[0], -1)
-                #         var_list = [var_name1] + [i.strip() for i in var_list[1:]]
-
-                #         for v in var_list:
-                #             class_decl[3].append([var_type, v, "", var_modlist])
-                #     return stmt_type, "", False, None
-
-                # # something unknown
-                # return stmt_type, "", False, None
             end
         end
     end
@@ -560,7 +584,7 @@ defmodule CppHeaderParser do
                                                                     # even if stack_top[PUBLIC_SECTION] is False, we still try to process the statement,
                                                                     # since it can start with "public:"
                                                                     docstring = String.trim(self.docstring)
-                                                                    {stmt_type, name, parse_flag, decl} = parse_stmt(self, stmt, token, docstring: docstring)
+                                                                    {self, stmt_type, name, parse_flag, decl} = parse_stmt(self, stmt, token, docstring: docstring)
                                                                 end
                                                                 1 = 2
                                                                 {:break, self}
