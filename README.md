@@ -41,7 +41,6 @@ Current available modules:
 
 ## Dependencies
 
-- Python3 (Only during the compliation, required to compile OpenCV)
 - [CMake](https://cmake.org/)
 
 ## Installation
