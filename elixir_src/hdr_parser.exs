@@ -629,3 +629,9 @@ defmodule CppHeaderParser do
         parsed = CppHeaderParser.parse(parser, opencv_cpp_header_path)
     end
 end
+
+# c "hdr_parser.exs"
+# CppHeaderParser.test
+parser = CppHeaderParser.new
+[file|_] = System.argv()
+CppHeaderParser.parse(parser, file)
