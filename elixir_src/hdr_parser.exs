@@ -622,13 +622,10 @@ defmodule CppHeaderParser do
     def is_directive_if_0("#ifndef OPENCV_BINDING_PARSER"), do: true
     def is_directive_if_0(_), do: false
 
-    def test do
+    def test(opencv_cpp_header_path) do
         # c "hdr_parser.exs"
         # CppHeaderParser.test
         parser = CppHeaderParser.new
-        # just for testing
-        # [file|_] = System.argv()
-        file = "/Users/cocoa/Git/evision/3rd_party/opencv/modules/core/include/opencv2/core/mat1.hpp"
-        parsed = CppHeaderParser.parse(parser, file)
+        parsed = CppHeaderParser.parse(parser, opencv_cpp_header_path)
     end
 end
